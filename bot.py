@@ -12,8 +12,8 @@ from telegram.ext import (
     filters,
 )
 
-TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"].strip()
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip())
 
 SYSTEM_PROMPT = """
 You are Rosaleen Safety AI, an assistant for a US trucking safety department.
