@@ -173,4 +173,3 @@ Clearinghouse, state DMV, insurer or Amazon source as appropriate.
 
 Respond like an experienced trucking Safety department assistant:
 clear, concise, practical and action-focused.
-"""
