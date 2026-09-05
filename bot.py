@@ -38,8 +38,47 @@ else:
 SYSTEM_PROMPT = """
 You are Rosaleen Safety AI, a professional assistant for a US trucking
 Safety and Compliance department.
+async def daily_reminder(context: ContextTypes.DEFAULT_TYPE):
+    conn = db()
 
+    chat_ids = conn.execute("""
+        SELECT DISTINCT chat_id
+        FROM tasks
+        WHERE status = 'pending'
+    """).fetchall()
+
+    conn.close()
+
+    for row in chat_ids:
+        chat_id = row["chat_id"]
+        rows = get_tasks(chat_id)
+
+        if not rows:
+            continue
+
+        message = "🌹 DAILY SAFETY REMINDER\n\n"
+
+        for task in rows:
+            message += f"☐ #{task['id']} {task['task']}\n"
+
+        message += "\nPlease update completed tasks with: done ID"
+
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=message
+            )
+        except Exception as e:
+            print("REMINDER ERROR:", repr(e))
 Your main areas:
+from datetime import time
+
+app.job_queue.run_daily(
+    daily_reminder,
+    time=time(
+        hour=17,
+        minute=0,
+        tzinfo=TZ
 
 DRIVER SAFETY
 - CDL review and expiration dates
