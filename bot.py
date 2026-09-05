@@ -1,836 +1,176 @@
-import os
-import base64
-import sqlite3
-import tempfile
-from io import BytesIO
-from datetime import datetime
-from zoneinfo import ZoneInfo
+You are Rosaleen Safety AI, a professional US trucking Safety and Compliance assistant.
 
-from openai import OpenAI
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+You assist a trucking Safety Manager with daily operations, driver compliance,
+FMCSA regulations, Amazon Relay issues, insurance, claims, audits and documents.
 
-# =========================================================
-# SETTINGS
-# =========================================================
+CORE AREAS:
 
-TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"].strip()
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"].strip()
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-TZ = ZoneInfo("Asia/Tashkent")
-
-# Railway Volume bo'lsa /data ichida saqlaydi.
-# Bo'lmasa vaqtincha current folder ishlaydi.
-if os.path.isdir("/data"):
-    DB_PATH = "/data/safety_bot.db"
-else:
-    DB_PATH = "safety_bot.db"
-
-
-SYSTEM_PROMPT = """
-You are Rosaleen Safety AI, a professional assistant for a US trucking
-Safety and Compliance department.
-async def daily_reminder(context: ContextTypes.DEFAULT_TYPE):
-    conn = db()
-
-    chat_ids = conn.execute("""
-        SELECT DISTINCT chat_id
-        FROM tasks
-        WHERE status = 'pending'
-    """).fetchall()
-
-    conn.close()
-
-    for row in chat_ids:
-        chat_id = row["chat_id"]
-        rows = get_tasks(chat_id)
-
-        if not rows:
-            continue
-
-        message = "🌹 DAILY SAFETY REMINDER\n\n"
-
-        for task in rows:
-            message += f"☐ #{task['id']} {task['task']}\n"
-
-        message += "\nPlease update completed tasks with: done ID"
-
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=message
-            )
-        except Exception as e:
-            print("REMINDER ERROR:", repr(e))
-Your main areas:
-from datetime import time
-
-app.job_queue.run_daily(
-    daily_reminder,
-    time=time(
-        hour=17,
-        minute=0,
-        tzinfo=TZ
-
-DRIVER SAFETY
-- CDL review and expiration dates
-- Medical cards
+DRIVER QUALIFICATION
+- CDL validity and expiration
+- Medical Certificate / Med Card validity and expiration
+- Self-certification
+- CDL restrictions and endorsements
 - MVR review
+- PSP review
 - Driver Qualification Files
-- Driver onboarding
-- Drug & Alcohol testing
-- Clearinghouse
-- SAP / Return-to-Duty process
+- Previous employer verification
+- Clearinghouse queries
+- SAP / Return-to-Duty
+- Pre-employment drug tests
+- Random testing
+- Driver onboarding and termination
 
-DOT / FMCSA
+FMCSA / DOT COMPLIANCE
 - FMCSA regulations
 - DOT inspections
+- roadside inspections
 - violations
-- out-of-service issues
+- Out-of-Service violations
 - DataQs
-- safety scores
-- New Entrant audits
-- HOS / ELD
+- New Entrant Safety Audit
+- compliance reviews
+- HOS
+- ELD
+- Drug & Alcohol regulations
+- driver qualification requirements
+- vehicle maintenance compliance
+- accident register requirements
+
+SAFETY SCORES
+- CSA / SMS concepts
+- BASIC categories
+- Unsafe Driving
+- HOS Compliance
+- Vehicle Maintenance
+- Driver Fitness
+- Controlled Substances / Alcohol
+- Crash Indicator
+- inspection severity and safety impact
+- explain what may affect a carrier's safety profile
+- never invent exact FMCSA points if official information is not available
+
+AMAZON RELAY
+- carrier verification
+- compliance warnings
+- insurance / COI
+- RMIS
+- asset verification
+- driver verification
+- safety score related issues
+- account suspension / reinstatement support
+- document requests
+- trip compliance
+- lease / rental documentation
+- general appeal drafting support
 
 INSURANCE
 - COI
 - RMIS
-- driver approval
 - Great West
 - Progressive
 - GEICO
-- claims
+- driver approval
+- truck approval
 - loss runs
+- claims
+- accident documentation
+- renewal documents
+- cancellation notices
+- deductible questions
+- underwriting requests
 
-OPERATIONS / COMPLIANCE
+PERMITS / TAX / OPERATIONS
 - IFTA
 - IRP
-- permits
-- 2290
+- Form 2290
+- UCR
+- state permits
+- NY HUT
+- Oregon permits
+- New Mexico permits
+- Kentucky permits
 - PrePass
-- Amazon Relay compliance
-- safety audits
-
-DOCUMENT REVIEW
-When a CDL, MVR, inspection, citation, insurance document or other
-trucking document is uploaded:
-1. Identify the document.
-2. Extract important dates.
-3. Identify expiration dates.
-4. Identify violations or restrictions.
-5. Explain what Safety should do next.
-6. Clearly flag urgent issues.
-
-Never invent information.
-If a document is unclear or unreadable, say that.
-Do not claim a driver is legally eligible unless the available
-information supports it.
-Keep answers practical, concise and Safety-department focused.
-"""
-
-
-# =========================================================
-# DATABASE
-# =========================================================
-
-def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    conn = db()
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER NOT NULL,
-            user_id INTEGER,
-            task TEXT NOT NULL,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            completed_at TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-def add_task(chat_id, user_id, task):
-    conn = db()
-
-    cur = conn.execute("""
-        INSERT INTO tasks
-        (chat_id, user_id, task, status, created_at)
-        VALUES (?, ?, ?, 'pending', ?)
-    """, (
-        chat_id,
-        user_id,
-        task,
-        datetime.now(TZ).isoformat()
-    ))
-
-    conn.commit()
-    task_id = cur.lastrowid
-    conn.close()
-
-    return task_id
-
-
-def get_tasks(chat_id):
-    conn = db()
-
-    rows = conn.execute("""
-        SELECT id, task, created_at
-        FROM tasks
-        WHERE chat_id = ?
-        AND status = 'pending'
-        ORDER BY id
-    """, (chat_id,)).fetchall()
-
-    conn.close()
-    return rows
-
-
-def complete_task(chat_id, task_id):
-    conn = db()
-
-    cur = conn.execute("""
-        UPDATE tasks
-        SET status = 'done',
-            completed_at = ?
-        WHERE chat_id = ?
-        AND id = ?
-        AND status = 'pending'
-    """, (
-        datetime.now(TZ).isoformat(),
-        chat_id,
-        task_id
-    ))
-
-    conn.commit()
-    changed = cur.rowcount
-    conn.close()
-
-    return changed > 0
-
-
-def delete_task(chat_id, task_id):
-    conn = db()
-
-    cur = conn.execute("""
-        DELETE FROM tasks
-        WHERE chat_id = ?
-        AND id = ?
-    """, (chat_id, task_id))
-
-    conn.commit()
-    changed = cur.rowcount
-    conn.close()
-
-    return changed > 0
-
-
-# =========================================================
-# TELEGRAM COMMANDS
-# =========================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    text = """
-🌹 Rosaleen Safety AI is online.
-
-I can help with:
-
-📸 CDL / MVR / inspection photos
-📄 Safety documents
-🚛 FMCSA / DOT questions
-🧪 Clearinghouse / SAP
-🛡 Insurance / RMIS / COI
-📦 Amazon Relay
-✅ Daily Safety tasks
-
-TASK EXAMPLES:
-
-add task: Great West approval for John
-
-tasks
-
-done 3
-
-delete 3
-
-today
-
-You can also simply send me a Safety question.
-"""
-
-    await update.message.reply_text(text)
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    text = """
-🌹 ROSALEEN SAFETY AI COMMANDS
-
-/add TASK
-Add a Safety task.
-
-/tasks
-Show pending tasks.
-
-/done ID
-Complete a task.
-
-/delete ID
-Delete a task.
-
-/today
-Show today's Safety list.
-
-You can also write naturally:
-
-add task: check John CDL
-
-tasks
-
-done 2
-
-Or upload a CDL, MVR, inspection or other document.
-"""
-
-    await update.message.reply_text(text)
-
-
-# =========================================================
-# TASK COMMANDS
-# =========================================================
-
-async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    task = " ".join(context.args).strip()
-
-    if not task:
-        await update.message.reply_text(
-            "Write:\n/add Check Great West approval"
-        )
-        return
-
-    task_id = add_task(
-        update.effective_chat.id,
-        update.effective_user.id,
-        task
-    )
-
-    await update.message.reply_text(
-        f"✅ Task #{task_id} added:\n{task}"
-    )
-
-
-async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    rows = get_tasks(update.effective_chat.id)
-
-    if not rows:
-        await update.message.reply_text(
-            "✅ No pending Safety tasks."
-        )
-        return
-
-    message = "📋 PENDING SAFETY TASKS\n\n"
-
-    for row in rows:
-        message += f"#{row['id']} ⏳ {row['task']}\n"
-
-    await update.message.reply_text(message)
-
-
-async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not context.args:
-        await update.message.reply_text(
-            "Example:\n/done 3"
-        )
-        return
-
-    try:
-        task_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text(
-            "Please send the task number."
-        )
-        return
-
-    if complete_task(update.effective_chat.id, task_id):
-
-        await update.message.reply_text(
-            f"✅ Task #{task_id} completed."
-        )
-
-    else:
-
-        await update.message.reply_text(
-            f"⚠️ I couldn't find pending task #{task_id}."
-        )
-
-
-async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not context.args:
-        await update.message.reply_text(
-            "Example:\n/delete 3"
-        )
-        return
-
-    try:
-        task_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text(
-            "Please send the task number."
-        )
-        return
-
-    if delete_task(update.effective_chat.id, task_id):
-
-        await update.message.reply_text(
-            f"🗑 Task #{task_id} deleted."
-        )
-
-    else:
-
-        await update.message.reply_text(
-            f"⚠️ Task #{task_id} not found."
-        )
-
-
-async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    rows = get_tasks(update.effective_chat.id)
-
-    date = datetime.now(TZ).strftime("%B %d, %Y")
-
-    message = f"🌹 SAFETY DAILY — {date}\n\n"
-
-    if not rows:
-
-        message += "✅ No pending tasks."
-
-    else:
-
-        for row in rows:
-            message += f"☐ #{row['id']} {row['task']}\n"
-
-    await update.message.reply_text(message)
-
-
-# =========================================================
-# AI TEXT
-# =========================================================
-
-async def ask_ai(text):
-
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        instructions=SYSTEM_PROMPT,
-        input=text,
-    )
-
-    return response.output_text
-
-
-async def text_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    text = update.message.text.strip()
-
-    lower = text.lower()
-
-    # Natural task adding
-    prefixes = [
-        "add task:",
-        "add task ",
-        "task:",
-        "task "
-    ]
-
-    for prefix in prefixes:
-
-        if lower.startswith(prefix):
-
-            task = text[len(prefix):].strip()
-
-            if task:
-
-                task_id = add_task(
-                    update.effective_chat.id,
-                    update.effective_user.id,
-                    task
-                )
-
-                await update.message.reply_text(
-                    f"✅ Task #{task_id} added:\n{task}"
-                )
-
-            return
-
-    # Natural tasks command
-    if lower in [
-        "tasks",
-        "task list",
-        "show tasks",
-        "pending tasks"
-    ]:
-
-        await tasks_command(update, context)
-        return
-
-    # Natural today
-    if lower in [
-        "today",
-        "today tasks",
-        "daily",
-        "daily tasks"
-    ]:
-
-        await today_command(update, context)
-        return
-
-    # Natural done command
-    if lower.startswith("done "):
-
-        try:
-            task_id = int(lower.split()[1])
-
-            if complete_task(
-                update.effective_chat.id,
-                task_id
-            ):
-
-                await update.message.reply_text(
-                    f"✅ Task #{task_id} completed."
-                )
-
-            else:
-
-                await update.message.reply_text(
-                    f"⚠️ Task #{task_id} not found."
-                )
-
-        except:
-            await update.message.reply_text(
-                "Example: done 3"
-            )
-
-        return
-
-    # Natural delete
-    if lower.startswith("delete "):
-
-        try:
-            task_id = int(lower.split()[1])
-
-            if delete_task(
-                update.effective_chat.id,
-                task_id
-            ):
-
-                await update.message.reply_text(
-                    f"🗑 Task #{task_id} deleted."
-                )
-
-            else:
-
-                await update.message.reply_text(
-                    f"⚠️ Task #{task_id} not found."
-                )
-
-        except:
-            await update.message.reply_text(
-                "Example: delete 3"
-            )
-
-        return
-
-    # AI Safety question
-    try:
-
-        await update.message.chat.send_action("typing")
-
-        answer = await ask_ai(text)
-
-        await update.message.reply_text(answer)
-
-    except Exception as e:
-
-        print("TEXT AI ERROR:", repr(e))
-
-        await update.message.reply_text(
-            "⚠️ AI couldn't answer this request. Please try again."
-        )
-
-
-# =========================================================
-# PHOTO ANALYSIS
-# =========================================================
-
-async def photo_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    try:
-
-        await update.message.chat.send_action("typing")
-
-        photo = update.message.photo[-1]
-
-        tg_file = await photo.get_file()
-
-        data = BytesIO()
-
-        await tg_file.download_to_memory(out=data)
-
-        image_b64 = base64.b64encode(
-            data.getvalue()
-        ).decode("utf-8")
-
-        question = (
-            update.message.caption
-            or
-            """
-Analyze this trucking Safety document.
-
-If CDL:
-- State
-- Class
-- Name
-- CDL expiration
-- Restrictions
-- Endorsements
-- validity concerns
-
-If inspection/MVR:
+- apportioned registration basics
+
+DOCUMENT ANALYSIS:
+
+When reviewing a CDL:
+- driver name
+- state
+- class
+- CDL number if clearly readable
+- issue date
+- expiration date
+- endorsements
+- restrictions
+- whether the document appears expired
+- what Safety should verify next
+
+When reviewing a Medical Card:
+- driver name
+- medical examiner
+- issue date
+- expiration date
+- whether it appears expired
+- restrictions if visible
+- what Safety should verify with CDLIS/state records if necessary
+
+When reviewing an MVR:
+- license status
 - violations
-- dates
-- severity
-- Safety action needed
-
-Be concise.
-"""
-        )
-
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            instructions=SYSTEM_PROMPT,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": question
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url":
-                            f"data:image/jpeg;base64,{image_b64}"
-                        }
-                    ]
-                }
-            ]
-        )
-
-        await update.message.reply_text(
-            response.output_text
-        )
-
-    except Exception as e:
-
-        print("PHOTO ERROR:", repr(e))
-
-        await update.message.reply_text(
-            "⚠️ I couldn't analyze this image."
-        )
-
-
-# =========================================================
-# FILE / PDF ANALYSIS
-# =========================================================
-
-async def document_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    try:
-
-        await update.message.chat.send_action("typing")
-
-        document = update.message.document
-
-        file_name = document.file_name or "document"
-
-        tg_file = await document.get_file()
-
-        suffix = os.path.splitext(file_name)[1]
-
-        with tempfile.NamedTemporaryFile(
-            suffix=suffix,
-            delete=False
-        ) as temp:
-
-            temp_path = temp.name
-
-        await tg_file.download_to_drive(temp_path)
-
-        question = (
-            update.message.caption
-            or
-            """
-Analyze this trucking Safety document.
-
-Identify:
-- document type
-- driver/company
+- convictions
+- suspensions
+- accidents
 - important dates
-- expiration dates
+- points only when supported by the state/document
+- hiring or Safety concerns
+- what should be verified next
+
+When reviewing an inspection:
+- inspection date
+- state
+- driver
+- truck/unit
 - violations
-- insurance/compliance issues
-- what Safety should do next
+- OOS status
+- driver vs vehicle violation
+- likely Safety concern
+- recommended corrective action
+
+When reviewing insurance or FMCSA documents:
+- document type
+- company
+- policy or filing dates
+- expiration
+- missing information
+- compliance issues
+- recommended next action
+
+When reviewing Amazon Relay documents:
+- identify the issue
+- identify requested documents
+- explain likely compliance concern
+- recommend exact next steps
+- help draft concise appeals when asked
+
+DAILY SAFETY WORK:
+- create practical checklists
+- prioritize urgent expirations
+- summarize pending Safety work
+- identify missing documents
+- suggest next actions
+- keep answers concise and operational
+
+IMPORTANT RULES:
+Never invent facts, dates, points, legal status or FMCSA data.
+If text or an image is unreadable, say so.
+For current FMCSA status, current safety score, current Amazon status,
+or any live carrier data, clearly state that live verification is required
+unless the data was supplied by the user or connected through an approved live data source.
+Do not guarantee a driver is eligible to drive solely from one document.
+For compliance-critical decisions, recommend checking the official FMCSA,
+Clearinghouse, state DMV, insurer or Amazon source as appropriate.
+
+Respond like an experienced trucking Safety department assistant:
+clear, concise, practical and action-focused.
 """
-        )
-
-        # Upload document to OpenAI
-        with open(temp_path, "rb") as f:
-
-            uploaded = client.files.create(
-                file=f,
-                purpose="user_data"
-            )
-
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            instructions=SYSTEM_PROMPT,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": question
-                        },
-                        {
-                            "type": "input_file",
-                            "file_id": uploaded.id
-                        }
-                    ]
-                }
-            ]
-        )
-
-        await update.message.reply_text(
-            response.output_text
-        )
-
-        try:
-            client.files.delete(uploaded.id)
-        except:
-            pass
-
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-
-    except Exception as e:
-
-        print("DOCUMENT ERROR:", repr(e))
-
-        await update.message.reply_text(
-            "⚠️ I couldn't analyze this document."
-        )
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    init_db()
-
-    app = (
-        Application
-        .builder()
-        .token(TELEGRAM_TOKEN)
-        .build()
-    )
-
-    app.add_handler(
-        CommandHandler("start", start)
-    )
-
-    app.add_handler(
-        CommandHandler("help", help_command)
-    )
-
-    app.add_handler(
-        CommandHandler("add", add_command)
-    )
-
-    app.add_handler(
-        CommandHandler("tasks", tasks_command)
-    )
-
-    app.add_handler(
-        CommandHandler("done", done_command)
-    )
-
-    app.add_handler(
-        CommandHandler("delete", delete_command)
-    )
-
-    app.add_handler(
-        CommandHandler("today", today_command)
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.PHOTO,
-            photo_message
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.Document.ALL,
-            document_message
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            text_message
-        )
-    )
-
-    print("🌹 Rosaleen Safety AI V2 is running...")
-
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
