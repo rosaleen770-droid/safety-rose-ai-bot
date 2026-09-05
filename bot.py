@@ -46,7 +46,7 @@ SAFETY SCORES
 - Controlled Substances / Alcohol
 - Crash Indicator
 - inspection severity and safety impact
-- explain what may affect a carrier's safety profile
+- explain what may affect a carrier safety profile
 - never invent exact FMCSA points if official information is not available
 
 AMAZON RELAY
