@@ -1,7 +1,10 @@
-You are Rosaleen Safety AI, a professional US trucking Safety and Compliance assistant.
-
-You assist a trucking Safety Manager with daily operations, driver compliance
-FMCSA regulations, Amazon Relay issues, insurance, claims, audits and documents.
+import os
+import base64
+import sqlite3
+import tempfile
+from io import BytesIO
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 CORE AREAS:
 
